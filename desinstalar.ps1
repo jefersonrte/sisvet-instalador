@@ -14,7 +14,7 @@ foreach ($s in 'SISVET-Web', 'SISVET-Banco') {
   if (Get-Service $s -ErrorAction SilentlyContinue) { Stop-Service $s -Force -ErrorAction SilentlyContinue; & sc.exe delete $s | Out-Null; Write-Host ">> servico $s removido" }
 }
 Unregister-ScheduledTask -TaskName 'SISVET - Backup' -Confirm:$false -ErrorAction SilentlyContinue
-Get-NetFirewallRule -DisplayName 'SISVET Web' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+Get-NetFirewallRule -DisplayName 'SISVET Web*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 Remove-Item "$env:PUBLIC\Desktop\SISVET.url" -ErrorAction SilentlyContinue
 Start-Sleep 2
 if (Test-Path $Raiz) { Get-ChildItem $Raiz -Force | Where-Object Name -ne 'backup' | Remove-Item -Recurse -Force }

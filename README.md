@@ -16,8 +16,8 @@ O instalador:
 2. instala o Visual C++ da Microsoft se faltar (assinatura conferida);
 3. monta PHP 8.4 + Apache 2.4 + MariaDB 11.4 em `C:\sisvet` como dois serviços que sobem com o Windows:
    **SISVET-Banco** e **SISVET-Web**, cada um na sua conta virtual (`NT SERVICE\...`), com acesso só às pastas que usa;
-4. banco e site escutam **só em 127.0.0.1** (porta 3307 e 8090); a pasta `C:\sisvet` fica restrita a administradores;
-5. cria o atalho **SISVET** na área de trabalho, backup diário às 12:30 em `C:\sisvet\backup` (últimos 30) e mostra a senha inicial do `admin` uma vez.
+4. o site (porta 8090) fica **liberado para a rede local**: o firewall abre a porta e o ping só para a sub-rede local, e o Apache só atende endereços de rede privada (nunca a internet). O banco (porta 3307) atende só este computador. A pasta `C:\sisvet` fica restrita a administradores;
+5. mostra os endereços para os outros computadores (lista em `C:\sisvet\ENDERECOS-REDE.txt`), cria o atalho **SISVET** na área de trabalho, backup diário às 12:30 em `C:\sisvet\backup` (últimos 30) e mostra a senha inicial do `admin` uma vez.
 
 ## Atualizar
 
@@ -39,7 +39,7 @@ O dump só é importado quando o banco ainda está vazio; depois vai para `C:\si
 
 ```powershell
 $env:SISVET_PORTA = '8090'   # outra porta para o site
-$env:SISVET_REDE  = '1'      # libera o site para outros PCs da rede privada (regra de firewall só para perfis Privado/Domínio); '0' fecha
+$env:SISVET_REDE  = '0'      # só este computador (padrão '1': liberado para a rede local)
 ```
 As opções ficam gravadas em `C:\sisvet\config\opcoes.txt` e valem nas próximas atualizações.
 

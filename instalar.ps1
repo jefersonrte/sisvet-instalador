@@ -2,7 +2,7 @@
 # PowerShell como administrador:
 #   irm https://raw.githubusercontent.com/jefersonrte/sisvet-instalador/main/instalar.ps1 | iex
 # Rodar de novo = atualizar (faz backup do banco antes e mantem os dados); ou atualizar.ps1, que so roda se houver versao nova.
-# Opcoes (antes do comando):  $env:SISVET_PORTA = '8090'   $env:SISVET_REDE = '1' (libera para outros PCs da rede privada; '0' fecha)
+# Opcoes (antes do comando):  $env:SISVET_PORTA = '8090'   $env:SISVET_REDE = '0' (so este computador; padrao '1' = rede local)
 #   ficam gravadas em C:\sisvet\config\opcoes.txt e valem nas proximas atualizacoes.
 #   Banco existente: coloque o dump em C:\sisvet\importar\ (*.sql ou *.sql.gz) e a chave do app em C:\sisvet\importar\APP_KEY.txt
 #   (sem a chave os CPF/RG criptografados do dump nao abrem). So e importado quando o banco ainda esta vazio.
@@ -17,7 +17,7 @@ $Origem = if ($env:SISVET_ORIGEM) { $env:SISVET_ORIGEM.TrimEnd('/') } else { "ht
 # porta e rede: o que vier no ambiente; senao o que a instalacao anterior gravou em config\opcoes.txt; senao o padrao
 $Gravado = @{}; if (Test-Path "$Raiz\config\opcoes.txt") { Get-Content "$Raiz\config\opcoes.txt" | ForEach-Object { $k, $v = $_ -split '=', 2; if ($v) { $Gravado[$k.Trim()] = $v.Trim() } } }
 $Porta = if ($env:SISVET_PORTA) { [int]$env:SISVET_PORTA } elseif ($Gravado.PORTA) { [int]$Gravado.PORTA } else { 8090 }
-$Rede = if ($env:SISVET_REDE) { $env:SISVET_REDE -eq '1' } else { $Gravado.REDE -eq '1' }
+$Rede = if ($env:SISVET_REDE) { $env:SISVET_REDE -eq '1' } elseif ($Gravado.REDE) { $Gravado.REDE -eq '1' } else { $true }   # padrao: rede local
 $PortaBanco = 3307
 $SvcBanco = 'SISVET-Banco'; $SvcWeb = 'SISVET-Web'
 $Admins = '*S-1-5-32-544'; $Sistema = '*S-1-5-18'   # por SID: funciona em Windows de qualquer idioma
@@ -67,7 +67,7 @@ foreach ($p in @($Porta, $PortaBanco)) {
   if ($uso) { $dono = (Get-Process -Id $uso.OwningProcess -ErrorAction SilentlyContinue).Path
     if ($dono -notlike "$Raiz\*") { Falha "a porta $p ja esta em uso por $dono. Escolha outra com `$env:SISVET_PORTA." } }
 }
-Write-Host "SISVET Web - $(if ($Atualizando) { 'atualizacao' } else { 'instalacao' }) em $Raiz (porta $Porta, $(if ($Rede) { 'rede privada' } else { 'so este computador' }))"
+Write-Host "SISVET Web - $(if ($Atualizando) { 'atualizacao' } else { 'instalacao' }) em $Raiz (porta $Porta, $(if ($Rede) { 'rede local' } else { 'so este computador' }))"
 
 # --- 1. pastas (so administradores; os servicos ganham acesso so ao que precisam) ---------------------------------------
 Passo 'Preparando C:\sisvet'
@@ -108,8 +108,8 @@ if ($Atualizando -and (Get-Service $SvcBanco -ErrorAction SilentlyContinue)) {
   Passo 'Guardando uma copia do banco antes de atualizar'
   Start-Service $SvcBanco; Start-Sleep 3
   $sql = "$Raiz\tmp\antes-atualizar.sql"; $env:MYSQL_PWD = $script:RootSenha
-  & "$Raiz\mariadb\bin\mariadb-dump.exe" -uroot --host=127.0.0.1 "-P$PortaBanco" --single-transaction --routines --triggers --default-character-set=utf8mb4 "--result-file=$sql" sisvet
-  $ok = $LASTEXITCODE; Remove-Item Env:MYSQL_PWD; if ($ok) { Falha 'o backup do banco falhou; nada foi alterado.' }
+  Exe "$Raiz\mariadb\bin\mariadb-dump.exe" -uroot --host=127.0.0.1 "-P$PortaBanco" --single-transaction --routines --triggers --default-character-set=utf8mb4 "--result-file=$sql" sisvet | Out-Null
+  $ok = $script:Codigo; Remove-Item Env:MYSQL_PWD; if ($ok) { Falha "o backup do banco falhou; nada foi alterado. $($script:Erro)" }
   Sql2Gz $sql "$Raiz\backup\sisvet-antes-$Versao-$(Get-Date -f yyyyMMdd-HHmmss).sql.gz"; Remove-Item $sql
 }
 
@@ -188,6 +188,8 @@ realpath_cache_ttl=600
 "@ | Set-Content "$Raiz\php\php.ini" -Encoding ASCII
 
 $Ouvir = if ($Rede) { "0.0.0.0:$Porta" } else { "127.0.0.1:$Porta" }
+# mesmo com o firewall aberto, o Apache so atende enderecos de rede local (nunca internet)
+$Quem = if ($Rede) { 'Require ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 fc00::/7 fe80::/10' } else { 'Require all granted' }
 @"
 Define RAIZ "$R"
 ServerRoot "`${RAIZ}/apache"
@@ -238,7 +240,7 @@ DocumentRoot "`${RAIZ}/app/public"
 <Directory "`${RAIZ}/app/public">
   Options -Indexes +FollowSymLinks
   AllowOverride None
-  Require all granted
+  $Quem
   DirectoryIndex index.php
   RewriteEngine On
   RewriteCond %{HTTP:Authorization} .
@@ -328,9 +330,9 @@ if ($tabelas -eq 0) {
     $sql = "$Raiz\tmp\importar.sql"
     if ($dump.Extension -eq '.gz') { Gz2Sql $dump.FullName $sql } else { Copy-Item $dump.FullName $sql }
     $env:MYSQL_PWD = $script:RootSenha
-    & cmd.exe /c "`"$Raiz\mariadb\bin\mariadb.exe`" -uroot --host=127.0.0.1 -P$PortaBanco --default-character-set=utf8mb4 sisvet < `"$sql`""
-    $ok = $LASTEXITCODE; Remove-Item Env:MYSQL_PWD; Remove-Item $sql
-    if ($ok) { Falha 'a importacao do banco falhou.' }
+    Exe cmd.exe /c "`"$Raiz\mariadb\bin\mariadb.exe`" -uroot --host=127.0.0.1 -P$PortaBanco --default-character-set=utf8mb4 sisvet < `"$sql`"" | Out-Null
+    $ok = $script:Codigo; Remove-Item Env:MYSQL_PWD; Remove-Item $sql
+    if ($ok) { Falha "a importacao do banco falhou. $($script:Erro)" }
     Move-Item $dump.FullName "$Raiz\backup\importado-$(Get-Date -f yyyyMMdd-HHmmss)-$($dump.Name)"
     Remove-Item "$Raiz\importar\APP_KEY.txt" -ErrorAction SilentlyContinue   # ja esta no .env
   } else { Passo 'Criando as tabelas (banco novo, sem dados)' }
@@ -381,10 +383,15 @@ foreach ($d in '', '\config', '\logs', '\tmp') { Icacls "$Raiz$d" /grant "${SW}:
 $t = Exe "$Raiz\apache\bin\httpd.exe" -t -f "$Raiz\config\httpd.conf"; if ($script:Codigo) { Falha "configuracao do Apache: $($script:Erro) $t" }
 Start-Service $SvcWeb
 
-# firewall: so abre na rede privada quando pedido
-Get-NetFirewallRule -DisplayName 'SISVET Web' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-if ($Rede) { New-NetFirewallRule -DisplayName 'SISVET Web' -Direction Inbound -Protocol TCP -LocalPort $Porta -Action Allow -Profile Private, Domain `
-  -Program "$Raiz\apache\bin\httpd.exe" | Out-Null }
+# firewall: com rede, libera a porta do site e o ping so para a sub-rede local (em qualquer perfil, tambem se a rede
+# estiver marcada como Publica); o banco (3307) continua so neste computador
+Get-NetFirewallRule -DisplayName 'SISVET Web*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+if ($Rede) {
+  New-NetFirewallRule -DisplayName 'SISVET Web' -Direction Inbound -Protocol TCP -LocalPort $Porta -Action Allow -Profile Any `
+    -RemoteAddress LocalSubnet -Program "$Raiz\apache\bin\httpd.exe" -Description 'SISVET: site para a rede local' | Out-Null
+  New-NetFirewallRule -DisplayName 'SISVET Web (ping)' -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -Action Allow -Profile Any `
+    -RemoteAddress LocalSubnet -Description 'SISVET: responder ping da rede local' | Out-Null
+}
 
 # --- 9. backup diario, atalhos ---------------------------------------------------------------------------------------------
 @'
@@ -417,7 +424,15 @@ if (-not $ok) { Falha "o SISVET nao respondeu em http://127.0.0.1:$Porta (veja $
 Remove-Item "$Raiz\tmp\runtime", "$Raiz\tmp\app-nova" -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "`nSISVET $Versao funcionando em http://127.0.0.1:$Porta" -ForegroundColor Green
-if ($Rede) { Write-Host "Outros computadores da rede: http://$($env:COMPUTERNAME):$Porta" }
+if ($Rede) {
+  # IP da placa ligada ao roteador (com gateway): deixa de fora as placas virtuais (Hyper-V, WSL, VPN)
+  $ips = @(Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | ForEach-Object { $_.IPv4Address.IPAddress })
+  $end = @("http://$($env:COMPUTERNAME):$Porta") + ($ips | ForEach-Object { "http://${_}:$Porta" })
+  "SISVET - enderecos para os outros computadores da rede ($(Get-Date -f 'dd/MM/yyyy HH:mm'))`r`n" + ($end -join "`r`n") +
+    "`r`n`r`nSe o endereco pelo IP mudar, reserve um IP fixo para este computador no roteador." | Set-Content "$Raiz\ENDERECOS-REDE.txt" -Encoding ASCII
+  Write-Host "Outros computadores da rede acessam por:" -ForegroundColor Green; $end | ForEach-Object { Write-Host "   $_" }
+  Write-Host "(lista em $Raiz\ENDERECOS-REDE.txt)"
+} else { Remove-Item "$Raiz\ENDERECOS-REDE.txt" -ErrorAction SilentlyContinue }
 if ($NovaSenhaAdmin) {
   Write-Host "`nUsuario: admin    Senha: $NovaSenhaAdmin" -ForegroundColor Yellow
   Write-Host "Anote e troque a senha no primeiro acesso (copia em $Raiz\config\ACESSO.txt, so administradores leem)."
