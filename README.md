@@ -19,7 +19,13 @@ O instalador:
 4. banco e site escutam **só em 127.0.0.1** (porta 3307 e 8090); a pasta `C:\sisvet` fica restrita a administradores;
 5. cria o atalho **SISVET** na área de trabalho, backup diário às 12:30 em `C:\sisvet\backup` (últimos 30) e mostra a senha inicial do `admin` uma vez.
 
-Rodar o mesmo comando de novo (ou `C:\sisvet\ATUALIZAR.cmd`) **atualiza**: guarda uma cópia do banco antes e mantém os dados.
+## Atualizar
+
+```powershell
+irm https://raw.githubusercontent.com/jefersonrte/sisvet-instalador/main/atualizar.ps1 | iex
+```
+
+Ou dê duplo clique em `C:\sisvet\ATUALIZAR.cmd`. O comando compara a versão instalada com a última publicada e só atualiza quando há uma nova. Antes, guarda uma cópia do banco e mantém os dados, a porta e a opção de rede. Com `$env:SISVET_FORCAR = '1'` ele reinstala na mesma versão.
 
 ## Levar um banco existente
 
@@ -33,8 +39,9 @@ O dump só é importado quando o banco ainda está vazio; depois vai para `C:\si
 
 ```powershell
 $env:SISVET_PORTA = '8090'   # outra porta para o site
-$env:SISVET_REDE  = '1'      # libera o site para outros PCs da rede privada (regra de firewall só para perfis Privado/Domínio)
+$env:SISVET_REDE  = '1'      # libera o site para outros PCs da rede privada (regra de firewall só para perfis Privado/Domínio); '0' fecha
 ```
+As opções ficam gravadas em `C:\sisvet\config\opcoes.txt` e valem nas próximas atualizações.
 
 ## Recursos
 

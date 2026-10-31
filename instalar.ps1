@@ -1,8 +1,9 @@
 # SISVET Web - instalador para Windows 10/11 (tudo em C:\sisvet, sem Docker).
 # PowerShell como administrador:
 #   irm https://raw.githubusercontent.com/jefersonrte/sisvet-instalador/main/instalar.ps1 | iex
-# Rodar de novo = atualizar (faz backup do banco antes e mantem os dados).
-# Opcoes (antes do comando):  $env:SISVET_PORTA = '8090'   $env:SISVET_REDE = '1' (libera para outros PCs da rede privada)
+# Rodar de novo = atualizar (faz backup do banco antes e mantem os dados); ou atualizar.ps1, que so roda se houver versao nova.
+# Opcoes (antes do comando):  $env:SISVET_PORTA = '8090'   $env:SISVET_REDE = '1' (libera para outros PCs da rede privada; '0' fecha)
+#   ficam gravadas em C:\sisvet\config\opcoes.txt e valem nas proximas atualizacoes.
 #   Banco existente: coloque o dump em C:\sisvet\importar\ (*.sql ou *.sql.gz) e a chave do app em C:\sisvet\importar\APP_KEY.txt
 #   (sem a chave os CPF/RG criptografados do dump nao abrem). So e importado quando o banco ainda esta vazio.
 # Mensagens sem acento de proposito: o script roda em PowerShell 5.1 com qualquer codificacao.
@@ -13,8 +14,10 @@ $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
 $Raiz = 'C:\sisvet'
 $Repo = if ($env:SISVET_REPO) { $env:SISVET_REPO } else { 'jefersonrte/sisvet-instalador' }
 $Origem = if ($env:SISVET_ORIGEM) { $env:SISVET_ORIGEM.TrimEnd('/') } else { "https://github.com/$Repo/releases/latest/download" }
-$Porta = if ($env:SISVET_PORTA) { [int]$env:SISVET_PORTA } else { 8090 }
-$Rede = $env:SISVET_REDE -eq '1'
+# porta e rede: o que vier no ambiente; senao o que a instalacao anterior gravou em config\opcoes.txt; senao o padrao
+$Gravado = @{}; if (Test-Path "$Raiz\config\opcoes.txt") { Get-Content "$Raiz\config\opcoes.txt" | ForEach-Object { $k, $v = $_ -split '=', 2; if ($v) { $Gravado[$k.Trim()] = $v.Trim() } } }
+$Porta = if ($env:SISVET_PORTA) { [int]$env:SISVET_PORTA } elseif ($Gravado.PORTA) { [int]$Gravado.PORTA } else { 8090 }
+$Rede = if ($env:SISVET_REDE) { $env:SISVET_REDE -eq '1' } else { $Gravado.REDE -eq '1' }
 $PortaBanco = 3307
 $SvcBanco = 'SISVET-Banco'; $SvcWeb = 'SISVET-Web'
 $Admins = '*S-1-5-32-544'; $Sistema = '*S-1-5-18'   # por SID: funciona em Windows de qualquer idioma
@@ -351,7 +354,7 @@ SISVET Web - acesso inicial ($(Get-Date -f 'dd/MM/yyyy HH:mm'))
 Endereco: http://127.0.0.1:$Porta
 Usuario:  admin
 Senha:    $NovaSenhaAdmin
-Troque a senha em Administracao > Usuarios e apague este arquivo.
+Troque a senha (menu do usuario > Alterar minha senha) e apague este arquivo.
 "@ | Set-Content "$Raiz\config\ACESSO.txt" -Encoding ASCII
 }
 Artisan config:cache; Artisan route:cache; Artisan view:cache
@@ -400,7 +403,8 @@ Register-ScheduledTask -TaskName 'SISVET - Backup' -Action $acao -Trigger (New-S
   -Principal (New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest) `
   -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit '01:00:00') -Force | Out-Null
 
-$cmdAtual = "irm https://raw.githubusercontent.com/$Repo/main/instalar.ps1 | iex"
+"PORTA=$Porta`r`nREDE=$(if ($Rede) { 1 } else { 0 })" | Set-Content "$Raiz\config\opcoes.txt" -Encoding ASCII
+$cmdAtual = "irm https://raw.githubusercontent.com/$Repo/main/atualizar.ps1 | iex"
 "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -Command `"Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -NoExit -Command $cmdAtual'`"" |
   Set-Content "$Raiz\ATUALIZAR.cmd" -Encoding ASCII
 "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -Command `"Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -NoExit -File $Raiz\backup.ps1'`"" |
